@@ -44,6 +44,14 @@ export default class CucumberRouter {
     document.body.addEventListener("click", this._handleClick.bind(this));
   }
 
+
+  addProtectedRouteGuard(authCheck, callback) {
+    this._protectedRouteGuard = {
+      authCheck,
+      callback,
+    };    
+  }
+
   /**
    * Starts the router.
    * @returns {void}
@@ -75,24 +83,45 @@ export default class CucumberRouter {
     const path = window.location.pathname;
     const { route, params } = this._matchUrlToRoute(path);
 
-    console.log({ route, params });
+    // console.log({ route, params });
     // If no matching route found, route will be '404' route
     // which has been handled by _matchUrlToRoute already
     // await this._handleRoute({ route, params });
 
-
+    
     // Render template content into router outlet
     const template = route.template;
-    console.log('template', template);
+
+    if (template.hasAttribute('protected-route') && this._protectedRouteGuard) {
+      const valid = await this._protectedRouteGuard.authCheck();
+      if (!valid) {
+        if (template.hasAttribute('redirect')) {
+          return this.redirect(template.getAttribute('redirect'));
+        }
+        return this._protectedRouteGuard.callback();
+      }
+    }
+
     this.outlet.innerHTML = '';
     const spinnerID = this.outlet.getAttribute('router-spinner');
-    const spinner = document.querySelector(`template#${spinnerID}`).content.cloneNode(true);
-    this.outlet.appendChild(spinner);
+    // @TODO: spinner need to be first element child of this template,
+    // as content.cloneNode(true) is #document-fragment, not general DOM node
+    const spinner = document.querySelector(`template#${spinnerID}`).content.firstElementChild.cloneNode(true);
+    document.body.appendChild(spinner);
 
-    // If we have async script that need to fetch data from server/database
-    const asyncScript = template.content.querySelector('script[async]');
-    this.outlet.firstElementChild.remove();
-    this.outlet.appendChild(template.content.cloneNode(true));
+    if (template.hasAttribute('async-render')) {
+      const tempContainer = document.createElement('div');
+      tempContainer.style.opacity = '0';
+      tempContainer.appendChild(template.content.cloneNode(true));
+      this.outlet.replaceChildren(tempContainer);
+      window.addEventListener('dataFetched', () => {
+        this.outlet.replaceChildren(...tempContainer.children);
+        spinner.remove();
+      }, { once: true });
+    } else {
+      this.outlet.replaceChildren(template.content.cloneNode(true));
+      spinner.remove();
+    }
   }
 
   /**
